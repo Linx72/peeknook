@@ -1,0 +1,57 @@
+# PeekNook Cloud — production stack
+# Usage: cp .env.prod.example .env.prod && docker compose -f docker-compose.prod.yml up -d
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    env_file: .env.prod
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-peeknook}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-peeknook_cloud}
+    volumes:
+      - peeknook_pg:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-peeknook}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    env_file: .env.prod
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-peeknook}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?set MINIO_SECRET_KEY}
+    volumes:
+      - peeknook_minio:/data
+    restart: unless-stopped
+
+  cloud-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${CLOUD_PORT:-8090}:8090"
+    env_file: .env.prod
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-peeknook}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-peeknook_cloud}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-peeknook}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET: ${MINIO_BUCKET:-peeknook-sync}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  peeknook_pg:
+  peeknook_minio:

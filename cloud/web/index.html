@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PeekNook Cloud</title>
+  <style>
+    :root { font-family: system-ui, sans-serif; color: #1c1917; background: #fafaf9; }
+    body { max-width: 960px; margin: 0 auto; padding: 2rem 1rem; }
+    h1 span { color: #d97706; }
+    .card { background: #fff; border: 1px solid #e7e5e4; border-radius: 12px; padding: 1.25rem; margin: 1rem 0; }
+    input, button { padding: .5rem .75rem; border-radius: 8px; border: 1px solid #d6d3d1; }
+    button { background: #292524; color: #fff; cursor: pointer; }
+    button.secondary { background: #fff; color: #292524; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: .75rem; }
+    .stat { background: #fffbeb; border-radius: 8px; padding: .75rem; text-align: center; }
+    .stat b { display: block; font-size: 1.4rem; }
+    .hidden { display: none; }
+    table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+    td, th { text-align: left; padding: .4rem; border-bottom: 1px solid #f5f5f4; }
+  </style>
+</head>
+<body>
+  <h1>Peek<span>Nook</span> Cloud</h1>
+  <p>Sync, backup, and API keys for PeekNook Desktop.</p>
+
+  <section id="auth" class="card">
+    <h2>Sign in</h2>
+    <input id="email" type="email" placeholder="Email" style="width:100%;margin:.25rem 0" />
+    <input id="password" type="password" placeholder="Password" style="width:100%;margin:.25rem 0" />
+    <div style="margin-top:.75rem;display:flex;gap:.5rem">
+      <button onclick="login()">Login</button>
+      <button class="secondary" onclick="register()">Register</button>
+    </div>
+    <p id="auth-msg" style="color:#57534e;font-size:.9rem"></p>
+  </section>
+
+  <section id="dash" class="hidden">
+    <div class="card">
+      <p>Signed in as <strong id="user-email"></strong> · <button class="secondary" onclick="logout()">Logout</button></p>
+      <div class="grid" id="stats"></div>
+    </div>
+    <div class="card">
+      <h2>API Keys</h2>
+      <button onclick="createKey()">Create key</button>
+      <ul id="keys"></ul>
+    </div>
+    <div class="card">
+      <h2>Recent blobs</h2>
+      <table><thead><tr><th>File</th><th>Object</th><th>Size</th></tr></thead><tbody id="blobs"></tbody></table>
+    </div>
+    <div class="card">
+      <h2>Recent sync events</h2>
+      <table><thead><tr><th>Type</th><th>Op</th><th>When</th></tr></thead><tbody id="events"></tbody></table>
+    </div>
+    <div class="card">
+      <h2>Billing</h2>
+      <div id="billing"></div>
+      <button onclick="upgradePro()">Upgrade to Pro (dev)</button>
+    </div>
+    <div class="card">
+      <h2>Teams</h2>
+      <input id="team-name" placeholder="Team name" style="width:100%;margin:.25rem 0" />
+      <button onclick="createTeam()">Create team</button>
+      <ul id="teams"></ul>
+    </div>
+  </section>
+
+<script>
+const TOKEN_KEY = 'peeknook_cloud_token';
+const api = (path, opts = {}) => fetch(path, {
+  ...opts,
+  headers: {
+    'Content-Type': 'application/json',
+    ...(localStorage.getItem(TOKEN_KEY) ? { Authorization: 'Bearer ' + localStorage.getItem(TOKEN_KEY) } : {}),
+    ...(opts.headers || {}),
+  },
+});
+
+async function login() {
+  const email = document.getElementById('email').value;
+  const password = document.getElementById('password').value;
+  const r = await api('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
+  const data = await r.json();
+  if (!r.ok) return showAuth(data.detail || 'Login failed');
+  localStorage.setItem(TOKEN_KEY, data.access_token);
+  loadDash();
+}
+
+async function register() {
+  const email = document.getElementById('email').value;
+  const password = document.getElementById('password').value;
+  const r = await api('/auth/register', { method: 'POST', body: JSON.stringify({ email, password }) });
+  const data = await r.json();
+  if (!r.ok) return showAuth(typeof data.detail === 'string' ? data.detail : 'Register failed');
+  localStorage.setItem(TOKEN_KEY, data.access_token);
+  loadDash();
+}
+
+function logout() {
+  localStorage.removeItem(TOKEN_KEY);
+  document.getElementById('dash').classList.add('hidden');
+  document.getElementById('auth').classList.remove('hidden');
+}
+
+function showAuth(msg) { document.getElementById('auth-msg').textContent = msg; }
+
+function fmtBytes(n) {
+  if (n < 1024) return n + ' B';
+  if (n < 1048576) return (n/1024).toFixed(1) + ' KB';
+  return (n/1048576).toFixed(1) + ' MB';
+}
+
+async function loadDash() {
+  const me = await (await api('/me')).json();
+  document.getElementById('user-email').textContent = me.email;
+  document.getElementById('auth').classList.add('hidden');
+  document.getElementById('dash').classList.remove('hidden');
+
+  const stats = await (await api('/dashboard/stats')).json();
+  document.getElementById('stats').innerHTML = `
+    <div class="stat"><b>${stats.sync_events}</b>Sync events</div>
+    <div class="stat"><b>${stats.blobs}</b>Blobs</div>
+    <div class="stat"><b>${fmtBytes(stats.storage_bytes)}</b>Storage</div>
+    <div class="stat"><b>${stats.plan_id || 'free'}</b>Plan</div>`;
+
+  const billing = await (await api('/billing/subscription')).json();
+  document.getElementById('billing').innerHTML = `
+    <p>Plan: <strong>${billing.plan.name}</strong> — storage ${fmtBytes(billing.usage.storage_bytes)} / ${fmtBytes(billing.usage.storage_limit_bytes)}</p>`;
+
+  const teams = await (await api('/teams')).json();
+  document.getElementById('teams').innerHTML = teams.map(t =>
+    `<li>${t.name} <small>(${t.role})</small></li>`).join('') || '<li>No teams</li>';
+
+  const keys = await (await api('/api-keys')).json();
+  document.getElementById('keys').innerHTML = keys.map(k =>
+    `<li><code>${k.key_prefix}…</code> ${k.name} <small>${new Date(k.created_at).toLocaleDateString()}</small></li>`).join('');
+
+  const blobs = await (await api('/blobs')).json();
+  document.getElementById('blobs').innerHTML = blobs.items.map(b =>
+    `<tr><td>${b.filename}</td><td>${b.object_type}:${b.object_id.slice(0,8)}…</td><td>${fmtBytes(b.size_bytes)}</td></tr>`).join('');
+
+  const sync = await (await api('/sync/pull?limit=20')).json();
+  document.getElementById('events').innerHTML = sync.events.slice(-20).reverse().map(e =>
+    `<tr><td>${e.object_type}</td><td>${e.operation}</td><td>${new Date(e.created_at).toLocaleString()}</td></tr>`).join('');
+}
+
+async function createKey() {
+  const name = prompt('Key name', 'TermitPro') || 'TermitPro';
+  const r = await api('/api-keys', { method: 'POST', body: JSON.stringify({ name }) });
+  const data = await r.json();
+  if (r.ok) alert('Save this key for TermitPro IDE:\n\n' + data.api_key);
+  loadDash();
+}
+
+async function upgradePro() {
+  const r = await api('/billing/checkout', { method: 'POST', body: JSON.stringify({ plan_id: 'pro' }) });
+  const data = await r.json();
+  alert(data.message || 'Upgraded');
+  loadDash();
+}
+
+async function createTeam() {
+  const name = document.getElementById('team-name').value;
+  if (!name) return;
+  const r = await api('/teams', { method: 'POST', body: JSON.stringify({ name }) });
+  if (!r.ok) { alert(await r.text()); return; }
+  document.getElementById('team-name').value = '';
+  loadDash();
+}
+
+if (localStorage.getItem(TOKEN_KEY)) loadDash();
+</script>
+</body>
+</html>

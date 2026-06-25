@@ -1,0 +1,53 @@
+{
+  "name": "peeknook-termitpro",
+  "displayName": "PeekNook for TermitPro",
+  "description": "Search notebooks and sources from TermitPro IDE via PeekNook local API",
+  "version": "0.1.0",
+  "publisher": "peeknook",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": ["onCommand:peeknook.status"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "peeknook.status",
+        "title": "PeekNook: Show Status"
+      },
+      {
+        "command": "peeknook.search",
+        "title": "PeekNook: Search Knowledge"
+      },
+      {
+        "command": "peeknook.openNotebooks",
+        "title": "PeekNook: Open Notebooks UI"
+      }
+    ],
+    "configuration": {
+      "title": "PeekNook",
+      "properties": {
+        "peeknook.apiUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:5056",
+          "description": "PeekNook desktop API base URL (no trailing slash)"
+        },
+        "peeknook.uiUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:5173",
+          "description": "PeekNook Vite UI URL"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -watch -p ."
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.4.0"
+  }
+}

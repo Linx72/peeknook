@@ -1,0 +1,23 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capability for the main window",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "opener:default",
+    "shell:default",
+    "updater:default",
+    "process:allow-restart",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "peeknook-api",
+          "sidecar": true,
+          "args": true
+        }
+      ]
+    }
+  ]
+}

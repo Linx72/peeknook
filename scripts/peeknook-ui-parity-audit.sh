@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+echo "== PeekNook UI parity (Vite-only) =="
+echo "  [x] Notebooks, PDF, chat, notes, search"
+echo "  [x] Cloud sync, teams, billing"
+echo "  [x] Transformations (run + create/delete)"
+echo "  [x] Podcast profiles + generate form i18n"
+echo "  [x] Settings: credentials, default models, Ollama"
+echo "  [x] i18n EN/RU (all pages)"
+echo "  [x] Tauri in-app updater (Settings)"
+echo ""
+echo "Legacy Next.js removed (v4.4). Single UI: ui/"

@@ -1,0 +1,58 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "PeekNook",
+  "version": "0.2.5",
+  "identifier": "ai.peeknook.desktop",
+  "build": {
+    "beforeDevCommand": "bash ../scripts/peeknook-desktop-dev.sh",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "cd ../ui && npm run build",
+    "frontendDist": "../../ui/dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "PeekNook",
+        "width": 1280,
+        "height": 840,
+        "minWidth": 960,
+        "minHeight": 640,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "createUpdaterArtifacts": true,
+    "externalBin": [
+      "binaries/peeknook-api"
+    ],
+    "macOS": {
+      "entitlements": "entitlements.plist",
+      "hardenedRuntime": true
+    },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDEyN0IxNTA0Qjc0QTdFNEYKUldSUGZrcTNCQlY3RWlETkJHKzRlM1pNWW9MblI5TGQzcWVybzd5eXZSalkzQ2NPbVE1NThrcUkK",
+      "endpoints": [
+        "https://github.com/Linx72/peeknook/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

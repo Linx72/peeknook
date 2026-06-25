@@ -1,0 +1,49 @@
+# PeekNook Cloud MVP — auth, API keys, object storage hooks
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: peeknook
+      POSTGRES_PASSWORD: peeknook
+      POSTGRES_DB: peeknook_cloud
+    ports:
+      - "5433:5432"
+    volumes:
+      - peeknook_pg:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: peeknook
+      MINIO_ROOT_PASSWORD: peeknooksecret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - peeknook_minio:/data
+    restart: unless-stopped
+
+  cloud-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8090:8090"
+    environment:
+      DATABASE_URL: postgresql+psycopg://peeknook:peeknook@postgres:5432/peeknook_cloud
+      JWT_SECRET: peeknook-cloud-dev-secret-change-me
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: peeknook
+      MINIO_SECRET_KEY: peeknooksecret
+      MINIO_BUCKET: peeknook-sync
+    depends_on:
+      - postgres
+      - minio
+    restart: unless-stopped
+
+volumes:
+  peeknook_pg:
+  peeknook_minio:

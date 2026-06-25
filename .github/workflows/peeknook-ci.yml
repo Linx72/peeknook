@@ -1,0 +1,50 @@
+name: PeekNook CI
+
+on:
+  pull_request:
+    paths:
+      - 'ui/**'
+      - 'open_notebook/**'
+      - 'api/**'
+      - 'cloud/**'
+      - 'desktop/**'
+      - 'scripts/**'
+      - '.github/workflows/peeknook-ci.yml'
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  ui-and-extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Build Vite UI
+        run: |
+          cd ui
+          npm ci
+          npm run build
+      - name: Compile TermitPro extension
+        run: |
+          cd integrations/termitpro-vscode
+          npm ci
+          npm run compile
+
+  cloud-api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install cloud deps
+        run: |
+          cd cloud
+          python -m pip install -r requirements.txt
+      - name: Cloud DB init smoke
+        run: |
+          cd cloud
+          python -c "from api.database import init_db; init_db(); print('ok')"

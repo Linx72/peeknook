@@ -1,0 +1,74 @@
+# RepoBase source-quality workflow. Native macOS/Windows release jobs stay on
+# dedicated platform runners and are intentionally not executed by this Linux runner.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: https://data.forgejo.org/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Select supported Python
+        id: python
+        run: |
+          set -euo pipefail
+          for candidate in python3.13 python3.12 python3.11 python3; do
+            if command -v "$candidate" >/dev/null 2>&1 && \
+              "$candidate" -c 'import sys; raise SystemExit(not ((3, 11) <= sys.version_info < (3, 14)))'; then
+              echo "bin=$candidate" >> "$GITHUB_OUTPUT"
+              "$candidate" --version
+              exit 0
+            fi
+          done
+          echo "Python >=3.11,<3.14 is required" >&2
+          exit 1
+
+      - name: Validate Python syntax and release policy
+        run: |
+          set -euo pipefail
+          PYTHON="${{ steps.python.outputs.bin }}"
+          "$PYTHON" -m compileall -q api cloud open_notebook scripts tests run_api.py
+          "$PYTHON" scripts/peeknook-release-policy.py --ref refs/heads/main
+          "$PYTHON" scripts/peeknook-release-channel.py --json
+          "$PYTHON" scripts/peeknook-publish-repobase-release.py --help >/dev/null
+          config_file="$(mktemp)"
+          "$PYTHON" scripts/peeknook-build-config.py \
+            --release-base-url https://repobase.ru \
+            --repo releases/peeknook-releases \
+            --tag latest \
+            --out "$config_file"
+          rm -f "$config_file"
+
+      - name: Validate shell scripts
+        run: |
+          set -euo pipefail
+          git ls-files -z '*.sh' | xargs -0 -r bash -n
+
+      - name: Build web UI
+        run: |
+          set -euo pipefail
+          npm ci --prefix ui --ignore-scripts --no-audit --no-fund
+          npm run --prefix ui build
+
+      - name: Compile TermitPro extension
+        run: |
+          set -euo pipefail
+          npm ci --prefix integrations/termitpro-vscode --ignore-scripts --no-audit --no-fund
+          npm run --prefix integrations/termitpro-vscode compile
+
+      - name: Reject unresolved merge conflicts
+        run: |
+          set -euo pipefail
+          if git grep -n -E '^(<<<<<<< |>>>>>>> )' -- ':!*.lock' ':!*.patch'; then
+            echo "Unresolved merge-conflict markers found" >&2
+            exit 1
+          fi

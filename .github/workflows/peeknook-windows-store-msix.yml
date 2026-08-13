@@ -1,0 +1,53 @@
+# Manual QA bridge only. RepoBase remains the canonical source repository.
+name: PeekNook Windows Store MSIX QA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-msix:
+    name: Build unsigned MSIX structure
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Windows runner architecture
+        shell: pwsh
+        run: |
+          if ($env:PROCESSOR_ARCHITECTURE -ne "AMD64") {
+            throw "Windows Store QA requires an AMD64 runner"
+          }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: astral-sh/setup-uv@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install backend dependencies
+        run: uv sync
+      - name: Build Windows sidecar
+        shell: bash
+        run: bash scripts/build-backend.sh
+      - name: Smoke test Windows sidecar runtime
+        shell: pwsh
+        run: pwsh scripts/peeknook-windows-runtime-smoke.ps1
+      - name: Install UI and desktop dependencies
+        shell: pwsh
+        run: |
+          npm ci --prefix ui
+          npm ci --prefix desktop
+      - name: Build unpackaged Tauri application for Microsoft Store
+        shell: pwsh
+        env:
+          VITE_PEEKNOOK_DISTRIBUTION: windows-store
+        run: npm run tauri --prefix desktop -- build --no-bundle --config src-tauri/tauri.microsoft-store.conf.json
+      - name: Build and verify synthetic-identity MSIX
+        shell: pwsh
+        run: pwsh scripts/peeknook-build-windows-store-msix.ps1 -Mode Qa
+      - name: Upload non-publishable MSIX QA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: peeknook-windows-store-msix-qa
+          path: dist/windows-store/*
+          if-no-files-found: error

@@ -1,0 +1,263 @@
+# Temporary GitHub native-build/public-release bridge. RepoBase is the source of truth.
+name: PeekNook Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+env:
+  TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+  TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+jobs:
+  release-policy:
+    name: Validate release policy
+    runs-on: ubuntu-latest
+    env:
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+      WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+      REPOBASE_RELEASE_TOKEN: ${{ secrets.REPOBASE_RELEASE_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate public release credentials
+        run: python3 scripts/peeknook-release-policy.py --ref "$GITHUB_REF"
+
+  build-macos:
+    needs: release-policy
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify macOS runner architecture
+        run: |
+          test "$(uname -m)" = arm64
+          echo "Building darwin-aarch64 on $(sw_vers -productVersion)"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: astral-sh/setup-uv@v5
+      - name: Backend deps
+        run: uv sync
+      - name: Import macOS signing certificate
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: bash scripts/peeknook-import-macos-certificate.sh
+      - name: Build sidecar
+        run: bash scripts/build-backend.sh
+      - name: Build UI
+        run: cd ui && npm ci && npm run build
+      - name: Build Tauri (macOS)
+        run: |
+          UPDATER="${RUNNER_TEMP}/updater.json"
+          python3 scripts/peeknook-build-config.py \
+            --release-base-url https://repobase.ru \
+            --repo releases/peeknook-releases \
+            --tag latest \
+            --out "$UPDATER"
+          cd desktop
+          npm ci
+          npm run tauri build -- --config "$UPDATER"
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          UPDATER: ${{ runner.temp }}/updater.json
+      - name: Smoke test macOS bundle
+        run: |
+          APP="desktop/src-tauri/target/release/bundle/macos/PeekNook.app"
+          DMG=$(ls -1 desktop/src-tauri/target/release/bundle/dmg/*.dmg | head -1)
+          TAR=$(ls -1 desktop/src-tauri/target/release/bundle/macos/*.tar.gz | head -1)
+          test -d "$APP"
+          test -f "$DMG"
+          test -f "$TAR"
+          echo "App: $APP ($(du -sh "$APP" | cut -f1))"
+          echo "DMG: $DMG ($(du -sh "$DMG" | cut -f1))"
+          echo "Updater: $TAR"
+          test -x "$APP/Contents/MacOS/desktop"
+      - name: Verify signed and notarized macOS artifacts
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: bash scripts/peeknook-verify-macos-release.sh
+      - name: Remove macOS signing certificate
+        if: always() && startsWith(github.ref, 'refs/tags/v')
+        run: bash scripts/peeknook-import-macos-certificate.sh --cleanup
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: peeknook-macos
+          path: |
+            desktop/src-tauri/target/release/bundle/dmg/*.dmg
+            desktop/src-tauri/target/release/bundle/macos/PeekNook.app
+            desktop/src-tauri/target/release/bundle/macos/*.tar.gz
+            desktop/src-tauri/target/release/bundle/macos/*.sig
+
+  build-windows:
+    needs: release-policy
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Windows runner architecture
+        shell: pwsh
+        run: |
+          if ($env:PROCESSOR_ARCHITECTURE -ne "AMD64") {
+            throw "windows-x86_64 release requires an AMD64 runner"
+          }
+          Write-Host "Building windows-x86_64"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: astral-sh/setup-uv@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Backend deps
+        run: uv sync
+      - name: Build sidecar
+        run: bash scripts/build-backend.sh
+        shell: bash
+      - name: Smoke test Windows sidecar runtime
+        shell: pwsh
+        run: pwsh scripts/peeknook-windows-runtime-smoke.ps1
+      - name: Build UI
+        run: cd ui && npm ci && npm run build
+      - name: Import Windows signing certificate
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: pwsh scripts/peeknook-import-windows-certificate.ps1
+      - name: Build Tauri (Windows)
+        shell: bash
+        run: |
+          UPDATER="${RUNNER_TEMP}/updater.json"
+          python3 scripts/peeknook-build-config.py \
+            --release-base-url https://repobase.ru \
+            --repo releases/peeknook-releases \
+            --tag latest \
+            --out "$UPDATER"
+          cd desktop
+          npm ci
+          npm run tauri build -- --config "$UPDATER"
+        env:
+          UPDATER: ${{ runner.temp }}/updater.json
+          WINDOWS_SIGNING_TIMESTAMP_URL: ${{ secrets.WINDOWS_SIGNING_TIMESTAMP_URL }}
+      - name: Smoke test Windows bundle
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path desktop/src-tauri/target/release/bundle/nsis -Filter *.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          $msi = Get-ChildItem -Path desktop/src-tauri/target/release/bundle/msi -Filter *.msi -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $exe -and -not $msi) { throw "No Windows installer artifacts found" }
+          if ($exe) { Write-Host "EXE: $($exe.FullName) size=$($exe.Length)" }
+          if ($msi) { Write-Host "MSI: $($msi.FullName) size=$($msi.Length)" }
+      - name: Verify signed Windows artifacts
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: pwsh scripts/peeknook-verify-windows-release.ps1
+      - name: Remove Windows signing certificate
+        if: always() && startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: pwsh scripts/peeknook-import-windows-certificate.ps1 -Cleanup
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: peeknook-windows
+          path: |
+            desktop/src-tauri/target/release/bundle/msi/*.msi
+            desktop/src-tauri/target/release/bundle/nsis/*.exe
+            desktop/src-tauri/target/release/bundle/nsis/*.sig
+
+  publish-repobase:
+    name: Publish RepoBase Release
+    needs: [build-macos, build-windows]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: peeknook-macos
+          path: dist/repobase/macos
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: peeknook-windows
+          path: dist/repobase/windows
+      - name: Generate and publish RepoBase release
+        env:
+          REPOBASE_RELEASE_TOKEN: ${{ secrets.REPOBASE_RELEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          python3 scripts/peeknook-updater-manifest.py \
+            --version "$VERSION" \
+            --tag "$TAG" \
+            --repo releases/peeknook-releases \
+            --release-base-url https://repobase.ru \
+            --out dist/repobase/latest.json \
+            --require-platform darwin-aarch64 \
+            --require-platform windows-x86_64 \
+            dist/repobase/macos dist/repobase/windows
+          python3 scripts/peeknook-publish-repobase-release.py \
+            --tag "$TAG" \
+            --publish \
+            --confirm-repository releases/peeknook-releases \
+            dist/repobase
+
+  publish-release:
+    name: Publish GitHub Bridge Release
+    needs: [build-macos, build-windows, publish-repobase]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: peeknook-macos
+          path: dist/release/macos
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: peeknook-windows
+          path: dist/release/windows
+      - name: Generate legacy bridge manifest
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          python3 scripts/peeknook-updater-manifest.py \
+            --version "$VERSION" \
+            --tag "$TAG" \
+            --repo "${{ github.repository }}" \
+            --release-base-url https://github.com \
+            --out dist/release/latest.json \
+            --require-platform darwin-aarch64 \
+            --require-platform windows-x86_64 \
+            dist/release/macos dist/release/windows
+      - name: List release files
+        run: find dist/release -type f | sort
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/release/latest.json
+            dist/release/macos/**/*.dmg
+            dist/release/macos/**/*.tar.gz
+            dist/release/macos/**/*.sig
+            dist/release/windows/**/*.msi
+            dist/release/windows/**/*.exe
+            dist/release/windows/**/*.sig
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

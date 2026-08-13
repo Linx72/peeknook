@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "release_base_url": "https://repobase.ru",
+  "repository": "releases/peeknook-releases",
+  "visibility": "public",
+  "updater_manifest": "latest.json",
+  "required_platforms": [
+    "darwin-aarch64",
+    "windows-x86_64"
+  ],
+  "source_repository": "timeweb/peeknook",
+  "source_visibility": "private"
+}
